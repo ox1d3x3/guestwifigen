@@ -1,5 +1,3 @@
-# guestwifigen
-
 
 # 🛡️ OpenWrt Guest Wi-Fi Generator
 
