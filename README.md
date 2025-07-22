@@ -16,9 +16,7 @@ An interactive shell script to quickly and safely set up an **isolated Guest Wi-
 
 ---
 
-## 📸 Preview
-
-$ ./GuestWifiGen.sh
+``` $ ./GuestWifiGen.sh```
 
 Please provide the details for the new guest network.
 Enter the Guest Wi-Fi Name (SSID): MyGuestWiFi
@@ -66,6 +64,8 @@ Make the script executable:
 Run it:
 
 ```./GuestWifiGen.sh```
+
+***Restart the router***
 
 
 ⚙️ What It Does
