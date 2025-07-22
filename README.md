@@ -65,7 +65,8 @@ The script performs:
 
 ✅ Ensures client isolation
 
-🔐 Security Notes
+
+## 🔐 Security Notes
 Guest clients cannot access your main LAN
 
 All guest clients are isolated from each other
@@ -74,14 +75,16 @@ Password must be at least 8 characters
 
 Uses WPA2 + CCMP for encryption
 
-🧼 To Re-run or Reconfigure
+
+## 🧼 To Re-run or Reconfigure
 You can re-run the script anytime — it will:
 
 Clean up previous guest interface, firewall rules, and SSIDs
 
 Recreate them cleanly with your new inputs
 
-🛠️ Customisation
+
+## 🛠️ Customisation
 You can tweak:
 
 Default Guest IP/Subnet (GUEST_IP)
@@ -94,7 +97,7 @@ Add VLAN tagging, MAC filtering, or bandwidth limits (future roadmap)
 
 __________
 
-📜 License
+###📜 License
 GPL-3.0 license — do whatever you like, but attribution is appreciated.
-
+____________
 
