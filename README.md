@@ -16,29 +16,6 @@ An interactive shell script to quickly and safely set up an **isolated Guest Wi-
 
 ---
 
-``` $ ./GuestWifiGen.sh```
-
-Please provide the details for the new guest network.
-Enter the Guest Wi-Fi Name (SSID): MyGuestWiFi
-Enter the Guest Wi-Fi Password (at least 8 characters):
-
-
-│ Running Pre-flight Safety Checks │
-
-✅ System is OpenWrt.
-✅ Running with root privileges.
-✅ Guest SSID is set.
-✅ Secure password length confirmed.
-✅ 2.4GHz radio (radio0) found.
-⚠️ WARNING: 5GHz radio (radio1) not found. Will only set up a 2.4GHz network.
-
---- All safety checks passed. Proceeding with configuration. ---
-🧹 Cleaning up any previous guest network configurations...
-...
-✅ Guest Wi-Fi Setup Complete!
-
----
-
 ## 📦 Requirements
 
 - ✅ OpenWrt system
