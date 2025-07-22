@@ -115,6 +115,6 @@ SSID naming pattern
 Add VLAN tagging, MAC filtering, or bandwidth limits (future roadmap)
 
 📜 License
-MIT License — do whatever you like, but attribution is appreciated.
+GPL-3.0 license — do whatever you like, but attribution is appreciated.
 
 
