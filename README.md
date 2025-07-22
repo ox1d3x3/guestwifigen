@@ -25,7 +25,6 @@ Enter the Guest Wi-Fi Password (at least 8 characters):
 
 │ Running Pre-flight Safety Checks │
 
-
 ✅ System is OpenWrt.
 ✅ Running with root privileges.
 ✅ Guest SSID is set.
