@@ -91,6 +91,8 @@ SSID naming pattern
 
 Add VLAN tagging, MAC filtering, or bandwidth limits (future roadmap)
 
+__________
+
 📜 License
 GPL-3.0 license — do whatever you like, but attribution is appreciated.
 
