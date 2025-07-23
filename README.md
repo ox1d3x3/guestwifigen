@@ -18,8 +18,7 @@ An interactive shell script to quickly and safely set up an **isolated Guest Wi-
 
 ## 📦 Requirements
 
-- ✅ OpenWrt system
-- ✅ Root access (`ssh root@your.router`)
+- ✅ Root access (`ssh root@routerIP`)
 - ✅ UCI (default on OpenWrt)
 
 ---
@@ -28,11 +27,11 @@ An interactive shell script to quickly and safely set up an **isolated Guest Wi-
 
 1. Upload the script to your OpenWrt router:
 
-```scp GuestWifiGen.sh root@192.168.1.1:/root/``` (Easy way using WinSCP)
+```scp GuestWifiGen.sh root@routerIP:/root/``` (Easy way using WinSCP)
    
 SSH into the router:
 
-```ssh root@192.168.1.1```
+```ssh root@routerIP```
 
 Make the script executable:
 
