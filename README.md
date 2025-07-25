@@ -1,7 +1,7 @@
 
 # 🛡️ OpenWrt Guest Wi-Fi Generator
 
-An interactive shell script to quickly and safely set up an **isolated Guest Wi-Fi** network on OpenWrt. Designed to be beginner-friendly, secure by default, and compatible with most OpenWrt routers.
+Robust shell script to quickly and safely set up an **isolated Guest Wi-Fi** network on OpenWrt. Designed to be beginner-friendly, secure by default, and compatible with most OpenWrt routers.
 
 ---
 
