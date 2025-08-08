@@ -41,6 +41,10 @@ Run it:
 
 ```./GuestWifiGen.sh```
 
+Usage:
+#   - Install:  ./GuestWifiGen_v1.8.2.sh [--ip <guest_ip>]
+#   - Uninstall: ./GuestWifiGen_v1.8.2.sh uninstall
+
 ***Restart the router***
 
 
