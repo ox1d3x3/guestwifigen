@@ -54,7 +54,7 @@ The script performs:
 
 ✅ Configures DHCP server
 
-✅ Sets DNS servers (Cloudflare, Quad9, Google)
+✅ Sets DNS servers (Cloudflare, Google)
 
 ✅ Creates isolated firewall zone and rules
 
