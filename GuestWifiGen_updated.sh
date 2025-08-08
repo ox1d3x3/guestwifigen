@@ -1,28 +1,8 @@
-Of course. Based on the previous analysis, I have improved the script by fixing the critical bug, increasing its flexibility, and adding a much-needed uninstall feature.
-
-Here is the improved version of the script with detailed explanations of the changes.
-
-### Summary of Improvements:
-
-1.  **Bug Fix**: Removed the extraneous `}` at the end of the script, which caused a syntax error.
-2.  **Uninstall Feature**: You can now run the script with an `uninstall` argument (e.g., `./GuestWifiGen.sh uninstall`) to completely and safely remove all configurations created by it.
-3.  **Flexible DNS Configuration**: The script now asks you if you want to use custom public DNS servers or simply use your router's default DNS settings (e.g., for local ad-blocking with Pi-hole).
-4.  **Consistent Logic**: The final summary message now correctly reflects whether the 5GHz SSID was created, fixing a logic inconsistency.
-5.  **Enhanced Clarity**: Added more comments and improved user feedback messages for a better experience.
-6.  **Updated Version**: The script version has been updated to `v1.8.0` to reflect these significant improvements.
-
------
-
-### The Improved Script: `GuestWifiGen_v1.8.0.sh`
-
-Below is the complete, ready-to-use code. You can copy this into a new file on your OpenWrt router.
-
-```sh
 #!/bin/sh
 # =============================================================================
 # OpenWrt Guest Wi-Fi Configurator (v1.8.0)
 # =============================================================================
-# Author: X1 (Improved by Google's Gemini)
+# Author: X1 
 # Description: Creates or removes an isolated guest Wi-Fi network.
 #              Features optional 5GHz, QR code display, and custom DNS.
 #
@@ -276,3 +256,4 @@ main() {
 main "$@"
 
 ```
+
