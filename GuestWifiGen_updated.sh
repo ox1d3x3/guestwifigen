@@ -2,7 +2,7 @@
 # =============================================================================
 # OpenWrt Guest Wi-Fi Configurator (v1.7.5)
 # =============================================================================
-# Author: Mahabub X (Enhanced by GPT-5)
+# Author: X1
 # Description: Creates an isolated guest Wi-Fi network with optional 5GHz and
 #              QR code display for quick mobile connection.
 # =============================================================================
@@ -215,3 +215,4 @@ echo "SSID: ${GUEST_SSID}"
 echo "Password: (hidden)"
 echo "Clients on this network are isolated from your main LAN and from each other."
 show_qr
+
