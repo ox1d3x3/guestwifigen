@@ -42,8 +42,8 @@ Run it:
 ```./GuestWifiGen.sh```
 
 Usage:
-#   - Install:  ./GuestWifiGen_v1.8.2.sh [--ip <guest_ip>]
-#   - Uninstall: ./GuestWifiGen_v1.8.2.sh uninstall
+- Install:  ./GuestWifiGen_vXXX.sh [--ip <guest_ip>] (You can add different IP range)
+- Uninstall: ./GuestWifiGen_vXXX.sh uninstall (Uninstall previous config and re-run it)
 
 ***Restart the router***
 
