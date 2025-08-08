@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# OpenWrt Guest Wi-Fi Configurator (v1.8.2)
+# OpenWrt Guest Wi-Fi Gen (v1.8.2)
 # =============================================================================
 # Usage:
 #   - Install:  ./GuestWifiGen_v1.8.2.sh [--ip <guest_ip>]
@@ -263,7 +263,7 @@ show_banner() {
     echo "   #                     / /_/ />  </ / /_/ /  __/                                    "
     echo "   #                     \____/_/|_/_/\__,_/\___/                                     "
     echo "   #                                                                                  "
-    echo "   #              OpenWrt Guest Wi-Fi Configurator (v1.8.2)                           "
+    echo "   #                OpenWrt Guest Wi-Fi Generator (v1.8.2)                            "
     echo "   #                                                                                  "
     echo "   # #############################################################################    "
     echo ""
