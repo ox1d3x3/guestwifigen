@@ -20,15 +20,17 @@ GUEST_NETMASK="255.255.255.0"
 
 # --- Banner ---
 clear
-echo "#############################################################################"
-echo "    ___    __                                                                "
-echo "  ____  _  _<  /___/ /__                                                      "
-echo " / __ \| |/_/ / __  / _ \                                                     "
-echo "/ /_/ />  </ / /_/ /  __/                                                     "
-echo "\____/_/|_/_/\__,_/\___/                                                      "
-echo "                                                                               "
-echo "          OpenWrt Guest Wi-Fi Configurator (v1.7.5)                           "
-echo "#############################################################################"
+echo "   # #############################################################################    "
+echo "   #                                  ___    __                                       "
+echo "   #                       ____  _  _<  /___/ /__                                     "
+echo "   #                      / __ \| |/_/ / __  / _ \                                    "
+echo "   #                     / /_/ />  </ / /_/ /  __/                                    "
+echo "   #                     \____/_/|_/_/\__,_/\___/                                     "
+echo "   #                                                                                  "
+echo "   #              OpenWrt Guest Wi-Fi Configurator (v1.7.5)                           "
+echo "   #                                                                                  "
+echo "   # #############################################################################    "
+echo " 
 echo ""
 
 # --- Helper functions ---
@@ -215,4 +217,5 @@ echo "SSID: ${GUEST_SSID}"
 echo "Password: (hidden)"
 echo "Clients on this network are isolated from your main LAN and from each other."
 show_qr
+
 
