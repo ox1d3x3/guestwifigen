@@ -3,8 +3,8 @@
 # OpenWrt Guest Wi-Fi Gen (v1.8.2)
 # =============================================================================
 # Usage:
-#   - Install:  ./GuestWifiGen_v1.8.2.sh [--ip <guest_ip>]
-#   - Uninstall: ./GuestWifiGen_v1.8.2.sh uninstall
+#   - Install:  ./GuestWifiGen_v1.x.x.sh [--ip <guest_ip>]
+#   - Uninstall: ./GuestWifiGen_v1.x.x.sh uninstall
 # =============================================================================
 
 # --- Colors ---
@@ -312,3 +312,4 @@ main() {
 
 # --- Run Script ---
 main "$@"
+
