@@ -1,106 +1,145 @@
+🛡️ OpenWrt Guest Wi-Fi Generator (v2.0.0)
 
-# 🛡️ OpenWrt Guest Wi-Fi Generator
+Robust ash/BusyBox shell script to quickly set up a locked-down Guest Wi-Fi on OpenWrt. Beginner-friendly, secure by default, and compatible with 19.07 / 21.02 / 22.03 / 23.05.
 
-Robust shell script to quickly and safely set up an **isolated Guest Wi-Fi** network on OpenWrt. Designed to be beginner-friendly, secure by default, and compatible with most OpenWrt routers.
+✨ Features
 
----
+🔐 WPA2-CCMP guest SSID (2.4 GHz + optional 5/6 GHz)
 
-## ✨ Features
+🧱 Dedicated guest firewall zone (input/forward = REJECT)
 
-- 🔐 Secure WPA2 encryption (2.4GHz & optional 5GHz)
-- 🔁 DHCP + DNS + Firewall zone isolation
-- 🔍 Safety checks before applying changes
-- 🚫 Prevents Guest devices from accessing main LAN
-- ✅ Re-runnable: cleans old config before applying
-- 🧹 Lightweight and dependency-free
+🔌 Client isolation at L2 (isolate=1) and L3 (firewall)
 
----
+🧭 DNS hijack (forces all guest DNS to router; no bypass)
 
-## 📦 Requirements
+🏷️ RFC1918 egress blocks over WAN (10/8, 172.16/12, 192.168/16)
 
-- ✅ Root access (`ssh root@routerIP`)
-- ✅ UCI (default on OpenWrt)
+🚫 WPS disabled on guest SSIDs
 
----
+❌ IPv6 disabled on guest interface (reduced attack surface)
 
-## 🚀 Installation
+♻️ Safe re-run: cleans old guest config before applying
 
-1. Upload the script to your OpenWrt router:
+📲 Optional QR code output if qrencode is installed
 
-```scp GuestWifiGen.sh root@routerIP:/root/``` (Easy way using WinSCP)
-   
-SSH into the router:
+🧰 Menu: generator + full backup + restore
 
-```ssh root@routerIP```
+📦 Requirements
 
-Make the script executable:
+✅ Root shell (ssh root@routerIP)
 
-```chmod +x GuestWifiGen.sh```
+✅ UCI (standard on OpenWrt)
 
-Run it:
+✅ Tested logic for OpenWrt 19.07 / 21.02 / 22.03 / 23.05
 
-```./GuestWifiGen.sh```
+🚀 Installation
 
-Usage:
-- Install:  ./GuestWifiGen_vXXX.sh [--ip <guest_ip>] (You can add different IP range)
-- Uninstall: ./GuestWifiGen_vXXX.sh uninstall (Uninstall previous config and re-run it)
+Upload the script (example using WinSCP), then:
 
-***Restart the router***
+ssh root@routerIP
+chmod +x GuestWifiGen_v2.0.0.sh
+./GuestWifiGen_v2.0.0.sh
 
 
-## ⚙️ What It Does
+The script shows a menu after your banner.
 
-The script performs:
+Menu options
 
-✅ Creates a new interface guest
+Run Guest Wi-Fi generator (fresh install)
 
-✅ Assigns static IP (default: 192.168.10.1)
+Makes a pre-change backup of key configs to guestwifi-prechange-<TS>.tar.gz
 
-✅ Configures DHCP server
+Asks for SSID + password (≥8 chars)
 
-✅ Sets DNS servers (Cloudflare, Google)
+Builds guest bridge, DHCP, firewall, SSIDs; enables radios; reloads services
 
-✅ Creates isolated firewall zone and rules
+Perform full system backup (migration/upgrade safe)
 
-✅ Adds 2.4GHz SSID (radio0)
+Uses sysupgrade -b openwrt-backup-<TS>.tar.gz
 
-✅ Optionally adds 5GHz SSID (radio1)
+Falls back to /etc archive if needed
 
-✅ Ensures client isolation
+Restore backup
 
+Auto-detects ./restore.tar.gz or a single restore*.tar.gz in current dir
 
-## 🔐 Security Notes
-Guest clients cannot access your main LAN
+Uses sysupgrade --restore-backup/-r when available; else safe extract
 
-All guest clients are isolated from each other
+Offers to reboot (recommended)
 
-Password must be at least 8 characters
+Uninstall any time:
 
-Uses WPA2 + CCMP for encryption
+./GuestWifiGen_v2.0.0.sh uninstall
 
+⚙️ What It Does
 
-## 🧼 To Re-run or Reconfigure
-You can re-run the script anytime — it will:
+Creates network.guest (bridge), default IP 192.168.10.1/24
 
-Clean up previous guest interface, firewall rules, and SSIDs
+Configures DHCP on guest
 
-Recreate them cleanly with your new inputs
+Sets DNS: by default guests use the router; optional upstream 1.1.1.1 / 8.8.8.8 via dnsmasq
 
+Creates a guest firewall zone with:
 
-## 🛠️ Customisation
-You can tweak:
+Allow: DHCP (67–68/udp) and DNS (53/tcp,udp) to router
 
-Default Guest IP/Subnet (GUEST_IP)
+Drop: guest → lan
 
-DNS servers
+DNS redirect (DNAT) guest:53 → router:53
 
-SSID naming pattern
+Block RFC1918 subnets over WAN
 
-Add VLAN tagging, MAC filtering, or bandwidth limits (future roadmap)
+Adds 2.4 GHz SSID; optionally adds 5/6 GHz -5G
 
-__________
+Sets isolate=1 and disables WPS on guest SSIDs
+
+Enables radios if disabled; reloads services
+
+🔐 Security Notes
+
+Guest devices cannot reach the main LAN
+
+Guest devices are isolated from each other
+
+DNS bypass is blocked (all guest DNS forced to router)
+
+Private upstream networks are blocked (RFC1918 over WAN)
+
+IPv6 disabled on guest; enable later if you specifically need v6
+
+🧼 Re-run / Reconfigure
+
+Running the script again will remove prior guest config and rebuild cleanly with your new inputs. Pre-change backups are saved automatically when you choose option 1.
+
+🛠️ Customisation
+
+Default Guest IP/Subnet (GUEST_IP, default 192.168.10.1/24)
+
+Upstream DNS (choose custom when prompted)
+
+Optional high-band SSID (-5G suffix)
+
+QR code output if qrencode is present
+
+🔄 Backups & Restore
+
+Pre-change (option 1): guestwifi-prechange-<TS>.tar.gz
+
+Full system (option 2): openwrt-backup-<TS>.tar.gz via sysupgrade -b
+
+Restore (option 3): supply restore.tar.gz (or one restore*.tar.gz)
+Reboot after restore for best results.
+
+⚠️ Notes & Compatibility
+
+Built for ash/BusyBox (no bashisms).
+
+Uses UCI only; works with firewall3 (iptables) and firewall4 (nftables).
+
+Radios are auto-detected and enabled; single-radio devices supported.
 
 📜 License
-GPL-3.0 license — do whatever you like, but attribution is appreciated.
-____________
 
+GPL-3.0 — attribution appreciated.
+
+Warning: Back up first. While designed to be safe and undoable (with backups/uninstall), use at your own risk.
