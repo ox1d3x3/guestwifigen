@@ -160,4 +160,4 @@ Radios are auto-detected and enabled; single-radio devices supported.
 
 GPL-3.0 — attribution appreciated.
 
-Warning: Back up first. While designed to be safe and undoable (with backups/uninstall), use at your own risk.
+# **Warning: Back up first. While designed to be safe and undoable (with backups/uninstall), use at your own risk.**
