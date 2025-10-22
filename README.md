@@ -1,4 +1,4 @@
-🛡️ OpenWrt Guest Wi-Fi Generator (v2.0.0)
+# 🛡️ OpenWrt Guest Wi-Fi Generator (v2.0.0)
 
 Robust ash/BusyBox shell script to quickly set up a locked-down Guest Wi-Fi on OpenWrt. Beginner-friendly, secure by default, and compatible with 19.07 / 21.02 / 22.03 / 23.05.
 
@@ -23,16 +23,18 @@ Robust ash/BusyBox shell script to quickly set up a locked-down Guest Wi-Fi on O
 📲 Optional QR code output if qrencode is installed
 
 🧰 Menu: generator + full backup + restore
+---------------------------------------------
 
-📦 Requirements
+# 📦 Requirements
 
 ✅ Root shell (ssh root@routerIP)
 
 ✅ UCI (standard on OpenWrt)
 
-✅ Tested logic for OpenWrt 19.07 / 21.02 / 22.03 / 23.05
+✅ Tested on OpenWrt 19.07 / 21.02 / 22.03 / 23.05
+-----------------------------------
 
-🚀 Installation
+# 🚀 Installation
 
 Upload the script (example using WinSCP), then:
 
@@ -41,9 +43,9 @@ chmod +x GuestWifiGen_v2.0.0.sh
 ./GuestWifiGen_v2.0.0.sh
 
 
-The script shows a menu after your banner.
+The script shows a menu
 
-Menu options
+**Menu options**
 
 Run Guest Wi-Fi generator (fresh install)
 
@@ -70,8 +72,9 @@ Offers to reboot (recommended)
 Uninstall any time:
 
 ./GuestWifiGen_v2.0.0.sh uninstall
+-----------------------------------------
 
-⚙️ What It Does
+# ⚙️ What It Does
 
 Creates network.guest (bridge), default IP 192.168.10.1/24
 
@@ -94,8 +97,9 @@ Adds 2.4 GHz SSID; optionally adds 5/6 GHz -5G
 Sets isolate=1 and disables WPS on guest SSIDs
 
 Enables radios if disabled; reloads services
+----------------------------------------------------
 
-🔐 Security Notes
+# 🔐 Security Notes
 
 Guest devices cannot reach the main LAN
 
@@ -106,12 +110,14 @@ DNS bypass is blocked (all guest DNS forced to router)
 Private upstream networks are blocked (RFC1918 over WAN)
 
 IPv6 disabled on guest; enable later if you specifically need v6
+------------------------------------------------------------------
 
-🧼 Re-run / Reconfigure
+# 🧼 Re-run / Reconfigure
 
 Running the script again will remove prior guest config and rebuild cleanly with your new inputs. Pre-change backups are saved automatically when you choose option 1.
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-🛠️ Customisation
+# 🛠️ Customisation
 
 Default Guest IP/Subnet (GUEST_IP, default 192.168.10.1/24)
 
@@ -120,8 +126,9 @@ Upstream DNS (choose custom when prompted)
 Optional high-band SSID (-5G suffix)
 
 QR code output if qrencode is present
+--------------------------------------------------------------
 
-🔄 Backups & Restore
+# 🔄 Backups & Restore
 
 Pre-change (option 1): guestwifi-prechange-<TS>.tar.gz
 
@@ -129,14 +136,16 @@ Full system (option 2): openwrt-backup-<TS>.tar.gz via sysupgrade -b
 
 Restore (option 3): supply restore.tar.gz (or one restore*.tar.gz)
 Reboot after restore for best results.
+----------------------------------------------------------------------
 
-⚠️ Notes & Compatibility
+# ⚠️ Notes & Compatibility
 
 Built for ash/BusyBox (no bashisms).
 
 Uses UCI only; works with firewall3 (iptables) and firewall4 (nftables).
 
 Radios are auto-detected and enabled; single-radio devices supported.
+------------------------------------------------------------------------------
 
 📜 License
 
