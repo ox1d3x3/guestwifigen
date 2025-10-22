@@ -23,6 +23,7 @@ Robust ash/BusyBox shell script to quickly set up a locked-down Guest Wi-Fi on O
 📲 Optional QR code output if qrencode is installed
 
 🧰 Menu: generator + full backup + restore
+
 ---------------------------------------------
 
 # 📦 Requirements
@@ -32,6 +33,7 @@ Robust ash/BusyBox shell script to quickly set up a locked-down Guest Wi-Fi on O
 ✅ UCI (standard on OpenWrt)
 
 ✅ Tested on OpenWrt 19.07 / 21.02 / 22.03 / 23.05
+
 -----------------------------------
 
 # 🚀 Installation
@@ -72,6 +74,7 @@ Offers to reboot (recommended)
 Uninstall any time:
 
 ./GuestWifiGen_v2.0.0.sh uninstall
+
 -----------------------------------------
 
 # ⚙️ What It Does
@@ -97,6 +100,7 @@ Adds 2.4 GHz SSID; optionally adds 5/6 GHz -5G
 Sets isolate=1 and disables WPS on guest SSIDs
 
 Enables radios if disabled; reloads services
+
 ----------------------------------------------------
 
 # 🔐 Security Notes
@@ -110,11 +114,13 @@ DNS bypass is blocked (all guest DNS forced to router)
 Private upstream networks are blocked (RFC1918 over WAN)
 
 IPv6 disabled on guest; enable later if you specifically need v6
+
 ------------------------------------------------------------------
 
 # 🧼 Re-run / Reconfigure
 
 Running the script again will remove prior guest config and rebuild cleanly with your new inputs. Pre-change backups are saved automatically when you choose option 1.
+
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 # 🛠️ Customisation
@@ -126,6 +132,7 @@ Upstream DNS (choose custom when prompted)
 Optional high-band SSID (-5G suffix)
 
 QR code output if qrencode is present
+
 --------------------------------------------------------------
 
 # 🔄 Backups & Restore
@@ -136,6 +143,7 @@ Full system (option 2): openwrt-backup-<TS>.tar.gz via sysupgrade -b
 
 Restore (option 3): supply restore.tar.gz (or one restore*.tar.gz)
 Reboot after restore for best results.
+
 ----------------------------------------------------------------------
 
 # ⚠️ Notes & Compatibility
@@ -145,6 +153,7 @@ Built for ash/BusyBox (no bashisms).
 Uses UCI only; works with firewall3 (iptables) and firewall4 (nftables).
 
 Radios are auto-detected and enabled; single-radio devices supported.
+
 ------------------------------------------------------------------------------
 
 📜 License
