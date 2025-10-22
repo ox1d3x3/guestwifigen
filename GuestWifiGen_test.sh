@@ -1,17 +1,17 @@
 #!/bin/sh
 # =============================================================================
-# OpenWrt Guest Wi‑Fi Gen (v1.8.3) 
+# OpenWrt Guest Wi‑Fi Gen (v1.8.4) — tested for 23.05 / 22.03 / 21.02 / 19.07
 # =============================================================================
 # Usage:
-#   - Install:  ./GuestWifiGen_v1.8.3.sh [--ip <guest_ip>]
-#   - Uninstall: ./GuestWifiGen_v1.8.3.sh uninstall
+#   - Install:   ./GuestWifiGen_v1.8.4.sh [--ip <guest_ip>]
+#   - Uninstall: ./GuestWifiGen_v1.8.4.sh uninstall
 
 
 # --- Color helpers (portable) ---
-ok()   { printf "\033[0;32m✅ %s\033[0m\n" "$1"; }
-warn() { printf "\033[1;33m⚠️  %s\033[0m\n" "$1"; }
-error(){ printf "\033[0;31m❌ %s\033[0m\n" "$1"; exit 1; }
-step() { printf "\033[0;36m▶ %s\033[0m\n"  "$1"; }
+ok()   { printf "\033[0;32m[OK]\033[0m %s\n" "$1"; }
+warn() { printf "\033[1;33m[WARN]\033[0m %s\n" "$1"; }
+error(){ printf "\033[0;31m[ERR]\033[0m %s\n" "$1"; exit 1; }
+step() { printf "\033[0;36m[STEP]\033[0m %s\n" "$1"; }
 
 # --- Static Configuration ---
 GUEST_IP="192.168.10.1"
@@ -45,8 +45,12 @@ system_checks() {
   step "Running system pre-flight checks"
   [ -f /etc/openwrt_release ] || error "Not running OpenWrt."
   [ "$(id -u)" -eq 0 ] || error "Run as root."
-  ok "OpenWrt detected and running as root."
   command -v uci >/dev/null 2>&1 || error "uci not available."
+  # These exist (names are stable) on the targeted releases
+  [ -x /etc/init.d/dnsmasq ] || warn "dnsmasq init not found (are you using a custom DHCP daemon?)"
+  [ -x /etc/init.d/firewall ] || warn "firewall init not found."
+  [ -x /etc/init.d/network ]  || warn "network init not found."
+  ok "OpenWrt detected and running as root."
 }
 
 # --- Convert dotted IPv4 to int (portable) ---
@@ -63,30 +67,32 @@ ip_to_int() {
         ;;
     esac
   done
-  # shellcheck disable=SC2003
   echo $(( ($1 << 24) | ($2 << 16) | ($3 << 8) | $4 ))
 }
 
 # --- IP overlap check vs LAN ---
 check_ip_conflict() {
   step "Checking for IP address conflicts..."
-  local lan_ip lan_mask lan_ip_i lan_mask_i guest_ip_i
+  local lan_ip lan_mask lan_ip_i lan_mask_i guest_ip_i guest_mask_i
   lan_ip="$(uci -q get network.lan.ipaddr)"
   lan_mask="$(uci -q get network.lan.netmask)"
-  if [ -n "$lan_ip" ] && [ -n "$lan_mask" ]; then
-    lan_ip_i=$(ip_to_int "$lan_ip")
-    lan_mask_i=$(ip_to_int "$lan_mask")
-    guest_ip_i=$(ip_to_int "$GUEST_IP")
-    if [ $((lan_ip_i & lan_mask_i)) -eq $((guest_ip_i & lan_mask_i)) ]; then
-      error "IP Conflict: LAN (${lan_ip}/${lan_mask}) overlaps with guest (${GUEST_IP}/${GUEST_NETMASK})."
-    fi
+  [ -n "$lan_ip" ] && [ -n "$lan_mask" ] || { ok "LAN ip/netmask not set via UCI; skipping overlap check."; return 0; }
+  lan_ip_i=$(ip_to_int "$lan_ip")
+  lan_mask_i=$(ip_to_int "$lan_mask")
+  guest_ip_i=$(ip_to_int "$GUEST_IP")
+  guest_mask_i=$(ip_to_int "$GUEST_NETMASK")
+  if [ $((lan_ip_i & lan_mask_i)) -eq $((guest_ip_i & lan_mask_i)) ]; then
+    error "IP Conflict: LAN (${lan_ip}/${lan_mask}) overlaps with guest (${GUEST_IP}/${GUEST_NETMASK})."
+  fi
+  if [ $((lan_ip_i & guest_mask_i)) -eq $((guest_ip_i & guest_mask_i)) ]; then
+    warn "LAN and Guest subnets share the same guest mask; overlap unlikely but double-check."
   fi
   ok "No IP conflicts detected."
 }
 
 # --- Radio detection (robust across versions) ---
 RADIO_2G=""
-RADIO_5G=""
+RADIO_HI=""
 detect_radios() {
   step "Detecting wireless radios..."
   local radios r band hwmode htmode
@@ -100,28 +106,27 @@ detect_radios() {
     # Prefer explicit band if present
     case "$band" in
       2g|2G) [ -z "$RADIO_2G" ] && RADIO_2G="$r" ;;
-      5g|5G|6g|6G) [ -z "$RADIO_5G" ] && RADIO_5G="$r" ;;
+      5g|5G|6g|6G) [ -z "$RADIO_HI" ] && RADIO_HI="$r" ;;
     esac
     # Fallback heuristics
     if [ -z "$band" ]; then
       if   echo "$hwmode" | grep -qiE '11b|11g'; then [ -z "$RADIO_2G" ] && RADIO_2G="$r"
-      elif echo "$hwmode" | grep -qiE '11a|11ac|11ax|11n'; then [ -z "$RADIO_5G" ] && RADIO_5G="$r"
-      elif echo "$htmode" | grep -qiE 'VHT|HE|EHT|160|80'; then [ -z "$RADIO_5G" ] && RADIO_5G="$r"
+      elif echo "$hwmode" | grep -qiE '11a|11ac|11ax|11n'; then [ -z "$RADIO_HI" ] && RADIO_HI="$r"
+      elif echo "$htmode" | grep -qiE 'VHT|HE|EHT|160|80'; then [ -z "$RADIO_HI" ] && RADIO_HI="$r"
       fi
     fi
   done
 
   # Final fallbacks
   if [ -z "$RADIO_2G" ]; then
-    # If only one radio exists, use it for 2.4 (some single-radio devices)
     set -- $radios
     [ -n "$1" ] && RADIO_2G="$1"
   fi
 
   [ -n "$RADIO_2G" ] || error "Could not find a suitable 2.4GHz-capable radio."
   ok "2.4GHz radio: $RADIO_2G"
-  if [ -n "$RADIO_5G" ]; then
-    ok "High-band radio (5/6GHz): $RADIO_5G"
+  if [ -n "$RADIO_HI" ]; then
+    ok "High-band radio (5/6GHz): $RADIO_HI"
   else
     warn "No 5/6GHz radio found. Will only set up a 2.4GHz network."
   fi
@@ -135,9 +140,12 @@ user_input_checks() {
     error "Password cannot be empty."
   fi
   [ "${#GUEST_PASSWORD}" -ge 8 ] || error "Password must be at least 8 characters."
-  # Ensure SSID doesn't already exist (case-insensitive, exact match on value in UCI output)
-  if uci show wireless | grep -iE "ssid='(${GUEST_SSID}|${GUEST_SSID}-5G)'" >/dev/null 2>&1; then
-    error "SSID '${GUEST_SSID}' (or 5G variant) already exists. Choose another."
+  # Ensure SSID doesn't already exist (exact match on value in UCI output)
+  if uci show wireless | grep -i "ssid='${GUEST_SSID}'" >/dev/null 2>&1; then
+    error "SSID '${GUEST_SSID}' already exists. Choose another."
+  fi
+  if uci show wireless | grep -i "ssid='${GUEST_SSID}-5G'" >/dev/null 2>&1; then
+    error "SSID '${GUEST_SSID}-5G' already exists. Choose another."
   fi
   ok "SSID & password look good."
 }
@@ -153,7 +161,7 @@ remove_guest_network() {
   uci -q delete firewall.${GUEST_CONFIG_NAME}_dns
   uci -q delete firewall.${GUEST_CONFIG_NAME}_block_lan
   uci -q delete wireless.${GUEST_CONFIG_NAME}_2g
-  uci -q delete wireless.${GUEST_CONFIG_NAME}_5g
+  uci -q delete wireless.${GUEST_CONFIG_NAME}_hi
   uci commit
   ok "Old guest configuration removed (if present)."
 }
@@ -164,7 +172,13 @@ reload_services() {
   /etc/init.d/network reload || warn "Could not reload network."
   /etc/init.d/dnsmasq restart || warn "Could not restart dnsmasq."
   /etc/init.d/firewall restart || warn "Could not restart firewall."
-  wifi reload || wifi up || warn "Could not reload wifi."
+  # Some builds prefer reload; others need up after enabling radios
+  if command -v wifi >/dev/null 2>&1; then
+    wifi reload 2>/dev/null || wifi up 2>/dev/null || warn "Could not reload wifi."
+  else
+    # Fallback: trigger via netifd if wifi helper not present
+    ubus call network reload 2>/dev/null || true
+  fi
 }
 
 # --- Setup network ---
@@ -175,6 +189,8 @@ setup_network() {
   uci set network.${GUEST_CONFIG_NAME}.ipaddr="${GUEST_IP}"
   uci set network.${GUEST_CONFIG_NAME}.netmask="${GUEST_NETMASK}"
   uci set network.${GUEST_CONFIG_NAME}.ip6assign="60"
+  # Explicit bridge to unify multiple AP ifaces across releases
+  uci set network.${GUEST_CONFIG_NAME}.type="bridge"
 }
 
 # --- Setup DHCP ---
@@ -241,8 +257,8 @@ setup_wifi() {
   step "Setting up 2.4GHz Guest SSID..."
   # Ensure radios are enabled
   uci set wireless.${RADIO_2G}.disabled='0'
-  if [ -n "$RADIO_5G" ]; then
-    uci set wireless.${RADIO_5G}.disabled='0'
+  if [ -n "$RADIO_HI" ]; then
+    uci set wireless.${RADIO_HI}.disabled='0'
   fi
 
   uci set wireless.${GUEST_CONFIG_NAME}_2g="wifi-iface"
@@ -254,21 +270,21 @@ setup_wifi() {
   uci set wireless.${GUEST_CONFIG_NAME}_2g.key="${GUEST_PASSWORD}"
   uci set wireless.${GUEST_CONFIG_NAME}_2g.isolate="1"
 
-  if [ -n "$RADIO_5G" ]; then
+  if [ -n "$RADIO_HI" ]; then
     printf "Also create a 5/6GHz guest SSID? [Y/n]: "
-    read create_5g
-    [ -z "$create_5g" ] && create_5g="Y"
-    case "$create_5g" in
+    read create_hi
+    [ -z "$create_hi" ] && create_hi="Y"
+    case "$create_hi" in
       Y|y)
         step "Creating high-band (5/6GHz) Guest SSID..."
-        uci set wireless.${GUEST_CONFIG_NAME}_5g="wifi-iface"
-        uci set wireless.${GUEST_CONFIG_NAME}_5g.device="${RADIO_5G}"
-        uci set wireless.${GUEST_CONFIG_NAME}_5g.mode="ap"
-        uci set wireless.${GUEST_CONFIG_NAME}_5g.network="${GUEST_CONFIG_NAME}"
-        uci set wireless.${GUEST_CONFIG_NAME}_5g.ssid="${GUEST_SSID}-5G"
-        uci set wireless.${GUEST_CONFIG_NAME}_5g.encryption="psk2+ccmp"
-        uci set wireless.${GUEST_CONFIG_NAME}_5g.key="${GUEST_PASSWORD}"
-        uci set wireless.${GUEST_CONFIG_NAME}_5g.isolate="1"
+        uci set wireless.${GUEST_CONFIG_NAME}_hi="wifi-iface"
+        uci set wireless.${GUEST_CONFIG_NAME}_hi.device="${RADIO_HI}"
+        uci set wireless.${GUEST_CONFIG_NAME}_hi.mode="ap"
+        uci set wireless.${GUEST_CONFIG_NAME}_hi.network="${GUEST_CONFIG_NAME}"
+        uci set wireless.${GUEST_CONFIG_NAME}_hi.ssid="${GUEST_SSID}-5G"
+        uci set wireless.${GUEST_CONFIG_NAME}_hi.encryption="psk2+ccmp"
+        uci set wireless.${GUEST_CONFIG_NAME}_hi.key="${GUEST_PASSWORD}"
+        uci set wireless.${GUEST_CONFIG_NAME}_hi.isolate="1"
         ;;
     esac
   fi
@@ -294,18 +310,20 @@ show_qr() {
 }
 
 # --- Banner ---
+
 show_banner() {
-  printf "%s\n" "   # #############################################################################    "
-  printf "%s\n" "   #                                  ___    __                                       "
-  printf "%s\n" "   #                       ____  _  _<  /___/ /__                                     "
-  printf "%s\n" "   #                      / __ \| |/_/ / __  / _ \                                    "
-  printf "%s\n" "   #                     / /_/ />  </ / /_/ /  __/                                    "
-  printf "%s\n" "   #                     \____/_/|_/_/\__,_/\___/                                     "
-  printf "%s\n" "   #                                                                                  "
-  printf "%s\n" "   #                OpenWrt Guest Wi‑Fi Generator (v1.8.3)                            "
-  printf "%s\n" "   #                                                                                  "
-  printf "%s\n" "   # #############################################################################    "
-  printf "\n"
+    clear
+    echo "   # #############################################################################    "
+    echo "   #                                  ___    __                                       "
+    echo "   #                       ____  _  _<  /___/ /__                                     "
+    echo "   #                      / __ \| |/_/ / __  / _ \                                    "
+    echo "   #                     / /_/ />  </ / /_/ /  __/                                    "
+    echo "   #                     \____/_/|_/_/\__,_/\___/                                     "
+    echo "   #                                                                                  "
+    echo "   #                OpenWrt Guest Wi-Fi Generator (v1.X.X)                            "
+    echo "   #                                                                                  "
+    echo "   # #############################################################################    "
+    echo ""
 }
 
 # --- Main ---
@@ -353,9 +371,7 @@ main() {
   printf "\n"
   ok "Guest Wi‑Fi Setup Complete!"
   printf "SSID: %s\n" "$GUEST_SSID"
-  if [ -n "$RADIO_5G" ]; then
-    printf "SSID (5/6GHz): %s-5G\n" "$GUEST_SSID"
-  fi
+  [ -n "$RADIO_HI" ] && printf "SSID (5/6GHz): %s-5G\n" "$GUEST_SSID"
   printf "Password: (hidden)\n"
   printf "Clients on this network are isolated from your main LAN and from each other.\n"
   show_qr
