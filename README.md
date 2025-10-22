@@ -24,6 +24,7 @@ Robust ash/BusyBox shell script to quickly set up a **locked-down Guest Wi-Fi** 
 - ✅ Root shell (`ssh root@routerIP`)
 - ✅ UCI (standard on OpenWrt)
 - ✅ OpenWrt **19.07 / 21.02 / 22.03 / 23.05**
+- ✅ For QRcode Display - package require - qrencode `opkg update && opkg install qrencode`
 
 ---
 
