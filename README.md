@@ -79,6 +79,13 @@ The script shows a menu.
 
 ---
 
+## Screenshots
+<img width="869" height="509" alt="image" src="https://github.com/user-attachments/assets/bdd7bee9-a7d8-44a2-8911-d62b97119cb6" />
+<img width="955" height="583" alt="image" src="https://github.com/user-attachments/assets/4927cf77-7220-4b11-a688-0eaa45b6a5fa" />
+
+
+
+
 ## 🔐 Security Notes
 
 - Guest devices **cannot reach** the main LAN  
