@@ -32,7 +32,7 @@ Robust ash/BusyBox shell script to quickly set up a locked-down Guest Wi-Fi on O
 
 ✅ UCI (standard on OpenWrt)
 
-✅ Tested on OpenWrt 19.07 / 21.02 / 22.03 / 23.05
+✅ OpenWrt 19.07 / 21.02 / 22.03 / 23.05
 
 -----------------------------------
 
