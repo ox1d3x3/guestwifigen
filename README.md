@@ -1,6 +1,6 @@
 # 🛡️ OpenWrt Guest Wi-Fi Generator
 
-Robust ash/BusyBox shell script to quickly set up a **locked-down Guest Wi-Fi** on OpenWrt. Beginner-friendly, secure by default, and compatible with **19.07 / 21.02 / 22.03 / 23.05**.
+Robust ash/BusyBox shell script to quickly set up a **locked-down Guest Wi-Fi** on OpenWrt. Beginner-friendly, secure by default, and compatible with **19.07 / 21.02 / 22.03 / 23.05 / 24.xx **.
 
 ---
 
