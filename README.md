@@ -34,8 +34,8 @@ Upload the script (WinSCP is fine), then:
 
 ```sh
 ssh root@routerIP
-chmod +x GuestWifiGen_v2.0.0.sh
-./GuestWifiGen_v2.0.0.sh
+chmod +x GuestWifiGen_vX.sh
+./GuestWifiGen_vX.sh
 ```
 
 The script shows a menu.
@@ -58,7 +58,7 @@ The script shows a menu.
 
 **Uninstall any time:**
 ```sh
-./GuestWifiGen_v2.0.0.sh uninstall
+./GuestWifiGen_vX.sh uninstall
 ```
 
 ---
