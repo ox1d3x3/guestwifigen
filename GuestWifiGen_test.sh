@@ -1,7 +1,15 @@
 #!/bin/sh
 # =============================================================================
-# OpenWrt Guest Wi‑Fi Gen (v2.0.1)
-# Targeted OpenWrt: 24.xx/ 23.05 / 22.03 / 21.02 / 19.07
+# OpenWrt Guest Wi-Fi Gen (v3.0.0) - version-aware
+# Supported: 19.07 / 21.02 / 22.03 / 23.05 / 24.10 / 25.12 (+ SNAPSHOT)
+#
+# This release auto-detects the running OpenWrt version and adapts:
+#   - Encryption: WPA2 (psk2) everywhere; WPA3/SAE offered only on >=21.02
+#     where wpad (full) is present. Default stays WPA2 for max client compat.
+#   - Package manager: opkg (<=24.10) vs apk (>=25.12) for hint messages.
+#   - Service reload: wifi reload / wifi up with ubus reconf fallback.
+#   - DHCP "limit": clamped so start+limit never exceeds the /24 host range.
+#   - IPv6 on guest disabled on all branches (ip6assign removed; no delegation).
 # =============================================================================
 
 # --- Color helpers (portable) ---
@@ -15,10 +23,18 @@ alert() { printf "\033[0;31m[!]\033[0m %s\n" "$1"; }  # red notice
 # --- Static Configuration ---
 GUEST_IP="192.168.10.1"
 GUEST_NETMASK="255.255.255.0"
-GUEST_CONFIG_NAME="guest" # Internal UCI section base name
+GUEST_CONFIG_NAME="guest"   # Internal UCI section base name
 ACTION=""
 REPLACE_MODE=0
 REPLACE_SECTION=""
+
+# --- Version state (populated by detect_version) ---
+OWRT_RELEASE=""     # raw DISTRIB_RELEASE, e.g. "24.10.0" or "SNAPSHOT"
+OWRT_VERNUM=0       # integer major*100+minor, e.g. 2410 ; SNAPSHOT => 999999
+PKG_MGR="opkg"      # opkg or apk (for user-facing install hints only)
+WPA3_AVAILABLE=0    # 1 if SAE can be offered on this build
+ENC_MODE="psk2"     # final encryption mode applied to guest ifaces
+ENC_LABEL="WPA2"    # human label for summary/QR
 
 # --- Arg parsing (portable) ---
 while [ "$#" -gt 0 ]; do
@@ -38,7 +54,7 @@ show_banner() {
   printf "%s\n" "   #                     / /_/ />  </ / /_/ /  __/                                "
   printf "%s\n" "   #                     \\____/_/|_/_/\\__,_/\\___/                                "
   printf "%s\n" "   #                                                                               "
-  printf "%s\n" "   #                OpenWrt Guest Wi-Fi Generator (v2.0) Github@Ox1d3x3           "
+  printf "%s\n" "   #            OpenWrt Guest Wi-Fi Generator (v3.0.0) Github@Ox1d3x3              "
   printf "%s\n" "   #                                                                               "
   printf "%s\n" "   # #############################################################################"
   printf "\n"
@@ -50,11 +66,101 @@ timestamp() { date +"%Y%m%d-%H%M%S" 2>/dev/null || date; }
 # --- ask yes/no with default Y ---
 ask_yn() {
   # $1 prompt
-  local ans
+  ans=""
   printf "%s [Y/n]: " "$1"
   read ans
   [ -z "$ans" ] && ans="Y"
   case "$ans" in Y|y) return 0 ;; *) return 1 ;; esac
+}
+
+# --- Version detection ---------------------------------------------------------
+# Reads /etc/openwrt_release (DISTRIB_RELEASE). Sets OWRT_RELEASE, OWRT_VERNUM,
+# PKG_MGR and WPA3_AVAILABLE. SNAPSHOT/dev builds are treated as newest.
+detect_version() {
+  step "Detecting OpenWrt version..."
+  rel=""
+  if [ -r /etc/openwrt_release ]; then
+    # shellcheck disable=SC1091
+    rel="$( . /etc/openwrt_release 2>/dev/null; printf "%s" "$DISTRIB_RELEASE" )"
+  fi
+  [ -n "$rel" ] || rel="SNAPSHOT"
+  OWRT_RELEASE="$rel"
+
+  case "$rel" in
+    SNAPSHOT|snapshot|*SNAPSHOT*|*-SNAPSHOT)
+      OWRT_VERNUM=999999
+      ;;
+    *)
+      clean="$(printf "%s" "$rel" | sed 's/[^0-9.]//g')"
+      maj="${clean%%.*}"
+      rest="${clean#*.}"; min="${rest%%.*}"
+      case "$maj" in ''|*[!0-9]*) maj=0 ;; esac
+      case "$min" in ''|*[!0-9]*) min=0 ;; esac
+      OWRT_VERNUM=$(( maj * 100 + min ))
+      ;;
+  esac
+
+  # Package manager: apk landed as default in 25.12; opkg before that.
+  if [ "$OWRT_VERNUM" -ge 2512 ]; then
+    command -v apk >/dev/null 2>&1 && PKG_MGR="apk" || PKG_MGR="opkg"
+  else
+    PKG_MGR="opkg"
+  fi
+
+  # WPA3/SAE: encryption code exists from 21.02 onward AND requires full wpad
+  # (wpad-mini / wpad-basic-* cannot do SAE). Gate on both.
+  if [ "$OWRT_VERNUM" -ge 2102 ] && wpa3_supported; then
+    WPA3_AVAILABLE=1
+  else
+    WPA3_AVAILABLE=0
+  fi
+
+  if [ "$OWRT_VERNUM" -ge 999999 ]; then
+    ok "Detected OpenWrt: ${OWRT_RELEASE} (treated as newest; pkg=${PKG_MGR})"
+  else
+    ok "Detected OpenWrt: ${OWRT_RELEASE} (pkg=${PKG_MGR}, WPA3 available: $( [ "$WPA3_AVAILABLE" -eq 1 ] && echo yes || echo no ))"
+  fi
+}
+
+# --- Does this build's hostapd/wpad actually support SAE? ---
+wpa3_supported() {
+  # Full wpad provides SAE. wpad-mini and wpad-basic* do not. wpad-openssl /
+  # wpad-wolfssl / wpad-mbedtls DO. Detect by inspecting installed packages.
+  # Returns 0 (supported) / 1 (not).
+  pkgs=""
+  if command -v opkg >/dev/null 2>&1; then
+    pkgs="$(opkg list-installed 2>/dev/null | awk '{print $1}')"
+  elif command -v apk >/dev/null 2>&1; then
+    pkgs="$(apk list --installed 2>/dev/null | awk '{print $1}' | sed 's/-[0-9].*$//')"
+  fi
+  if [ -n "$pkgs" ]; then
+    # Any full wpad/hostapd variant that is not mini/basic implies SAE support.
+    echo "$pkgs" | grep -E '^(wpad|hostapd)(-(openssl|wolfssl|mbedtls))?$' | grep -qvE 'mini|basic' && return 0
+    # mini/basic only -> no SAE
+    echo "$pkgs" | grep -qE 'wpad-(mini|basic)' && return 1
+  fi
+  # Could not read package list (unusual). Be conservative: assume no SAE so we
+  # never hand out a config that silently fails to start hostapd.
+  return 1
+}
+
+# --- Decide encryption mode based on version + user choice ---
+choose_encryption() {
+  # Default everywhere: WPA2 (psk2+ccmp) for the broadest client compatibility.
+  ENC_MODE="psk2+ccmp"; ENC_LABEL="WPA2"
+  if [ "$WPA3_AVAILABLE" -eq 1 ]; then
+    printf "\n"
+    info "This build supports WPA3 (SAE)."
+    info "WPA2 = max compatibility. WPA3-mixed = WPA2+WPA3. WPA3-only may reject some older or quirky clients."
+    printf "Choose guest security: [1] WPA2 (default)  [2] WPA3/WPA2 mixed  [3] WPA3 only : "
+    read enc_choice
+    case "$enc_choice" in
+      2) ENC_MODE="sae-mixed"; ENC_LABEL="WPA3/WPA2-mixed" ;;
+      3) ENC_MODE="sae";       ENC_LABEL="WPA3-only" ;;
+      *) ENC_MODE="psk2+ccmp"; ENC_LABEL="WPA2" ;;
+    esac
+  fi
+  ok "Guest security: ${ENC_LABEL} (${ENC_MODE})"
 }
 
 # --- Safety checks ---
@@ -71,8 +177,9 @@ system_checks() {
 
 # --- Convert dotted IPv4 to int (portable) ---
 ip_to_int() {
-  local IFS=.
+  oldIFS="$IFS"; IFS=.
   set -- $1
+  IFS="$oldIFS"
   [ "$#" -eq 4 ] || error "Invalid IPv4: $1"
   for oct in "$@"; do
     case "$oct" in ''|*[!0-9]*) error "Invalid IPv4: $1" ;; *) [ "$oct" -ge 0 ] 2>/dev/null && [ "$oct" -le 255 ] 2>/dev/null || error "Invalid octet in IPv4: $1" ;; esac
@@ -83,7 +190,6 @@ ip_to_int() {
 # --- IP overlap check vs LAN ---
 check_ip_conflict() {
   step "Checking for IP address conflicts..."
-  local lan_ip lan_mask lan_ip_i lan_mask_i guest_ip_i guest_mask_i
   lan_ip="$(uci -q get network.lan.ipaddr)"
   lan_mask="$(uci -q get network.lan.netmask)"
   [ -n "$lan_ip" ] && [ -n "$lan_mask" ] || { ok "LAN ip/netmask not set via UCI; skipping overlap check."; return 0; }
@@ -104,9 +210,8 @@ check_ip_conflict() {
 RADIO_2G=""; RADIO_HI=""
 detect_radios() {
   step "Detecting wireless radios..."
-  local radios r band hwmode htmode
   radios="$(uci -q show wireless | sed -n 's/^wireless\.\(radio[^=]*\)=wifi-device.*/\1/p')"
-  [ -n "$radios" ] || error "No wifi-device sections found in /etc/config/wireless."
+  [ -n "$radios" ] || error "No wifi-device sections found in /etc/config/wireless. (Is a wifi driver installed?)"
 
   for r in $radios; do
     band="$(uci -q get wireless."$r".band)"
@@ -117,6 +222,7 @@ detect_radios() {
       5g|5G|6g|6G) [ -z "$RADIO_HI" ] && RADIO_HI="$r" ;;
     esac
     if [ -z "$band" ]; then
+      # Pre-band (19.07-era swconfig/ath) fallback via hwmode/htmode.
       if   echo "$hwmode" | grep -qiE '11b|11g'; then [ -z "$RADIO_2G" ] && RADIO_2G="$r"
       elif echo "$hwmode" | grep -qiE '11a|11ac|11ax|11n'; then [ -z "$RADIO_HI" ] && RADIO_HI="$r"
       elif echo "$htmode" | grep -qiE 'VHT|HE|EHT|160|80'; then [ -z "$RADIO_HI" ] && RADIO_HI="$r"
@@ -136,6 +242,8 @@ validate_creds_only() {
   [ -n "$GUEST_SSID" ] || error "SSID cannot be empty."
   if [ -z "$GUEST_PASSWORD" ]; then error "Password cannot be empty."; fi
   [ "${#GUEST_PASSWORD}" -ge 8 ] || error "Password must be at least 8 characters."
+  # WPA2/WPA3 PSK upper bound is 63 chars.
+  [ "${#GUEST_PASSWORD}" -le 63 ] || error "Password must be 63 characters or fewer."
   ok "SSID & password look good."
 }
 
@@ -148,7 +256,7 @@ ssid_exists() {
 # --- Choose which existing SSID section to replace (if multiple) ---
 select_existing_ssid_section() {
   # $1 SSID
-  local ss="$1" idx=1
+  ss="$1"
   MATCHING_SECTIONS="$(ssid_exists "$ss")"
   [ -n "$MATCHING_SECTIONS" ] || return 1
 
@@ -158,7 +266,7 @@ select_existing_ssid_section() {
     return 0
   fi
 
-  printf "\n"; alert "Multiple interfaces already use SSID '%s':" "$ss"
+  printf "\n"; alert "Multiple interfaces already use SSID '${ss}':"
   printf "%s\n" "$MATCHING_SECTIONS" | nl -w1 -s') '
   printf "Select which interface to replace [1-%s] (or 0 to cancel): " "$count"
   read sel
@@ -175,19 +283,18 @@ select_existing_ssid_section() {
 
 # --- Replace an existing wifi-iface section with guest settings ---
 replace_existing_ssid_section() {
-  # Uses REPLACE_SECTION, GUEST_SSID, GUEST_PASSWORD; assumes guest network/dhcp/firewall are/will be present
-  step "Replacing existing interface wireless.%s with guest settings..." "$REPLACE_SECTION"
-  # Ensure radios enabled for that device
+  step "Replacing existing interface wireless.${REPLACE_SECTION} with guest settings..."
   dev="$(uci -q get wireless.${REPLACE_SECTION}.device)"
   [ -n "$dev" ] && uci set wireless.${dev}.disabled='0'
-  # Re-point this iface to guest network and set security
   uci set wireless.${REPLACE_SECTION}.mode="ap"
   uci set wireless.${REPLACE_SECTION}.network="${GUEST_CONFIG_NAME}"
   uci set wireless.${REPLACE_SECTION}.ssid="${GUEST_SSID}"
-  uci set wireless.${REPLACE_SECTION}.encryption="psk2+ccmp"
+  uci set wireless.${REPLACE_SECTION}.encryption="${ENC_MODE}"
   uci set wireless.${REPLACE_SECTION}.key="${GUEST_PASSWORD}"
   uci set wireless.${REPLACE_SECTION}.isolate="1"
   uci set wireless.${REPLACE_SECTION}.wps_pushbutton="0"
+  # SAE/OWE transition robustness on newer builds; harmless on others.
+  [ "$ENC_MODE" = "sae-mixed" ] || [ "$ENC_MODE" = "sae" ] && uci set wireless.${REPLACE_SECTION}.ieee80211w='1'
 }
 
 # --- Cleanup / Uninstall ---
@@ -210,38 +317,61 @@ remove_guest_network() {
   ok "Old guest configuration removed (if present)."
 }
 
-# --- Reload Services ---
+# --- Reload Services (version-aware) ---
 reload_services() {
   step "Reloading services..."
-  /etc/init.d/network reload || warn "Could not reload network."
-  /etc/init.d/dnsmasq restart || warn "Could not restart dnsmasq."
-  /etc/init.d/firewall restart || warn "Could not restart firewall."
+  if [ -x /etc/init.d/network ]; then /etc/init.d/network reload || warn "Could not reload network."; fi
+  if [ -x /etc/init.d/dnsmasq ]; then /etc/init.d/dnsmasq restart || warn "Could not restart dnsmasq."; fi
+  if [ -x /etc/init.d/firewall ]; then /etc/init.d/firewall restart || warn "Could not restart firewall."; fi
+
+  # Wi-Fi reload. On modern builds 'wifi reload' is preferred; older accept
+  # 'wifi up'. As a last resort poke netifd via ubus to re-read config.
   if command -v wifi >/dev/null 2>&1; then
-    wifi reload 2>/dev/null || wifi up 2>/dev/null || warn "Could not reload wifi."
+    wifi reload 2>/dev/null || wifi up 2>/dev/null || warn "Could not reload wifi via 'wifi'."
+  elif command -v ubus >/dev/null 2>&1; then
+    ubus call network reload 2>/dev/null || warn "Could not reload network via ubus."
   else
-    ubus call network reload 2>/dev/null || true
+    warn "Neither 'wifi' nor 'ubus' found to reload wireless; a reboot may be needed."
   fi
 }
 
-# --- Setup network ---
+# --- Setup network (version-aware) ---
 setup_network() {
   step "Creating guest network interface..."
   uci set network.${GUEST_CONFIG_NAME}="interface"
   uci set network.${GUEST_CONFIG_NAME}.proto="static"
   uci set network.${GUEST_CONFIG_NAME}.ipaddr="${GUEST_IP}"
   uci set network.${GUEST_CONFIG_NAME}.netmask="${GUEST_NETMASK}"
-  uci set network.${GUEST_CONFIG_NAME}.ip6assign="0"   # disable IPv6 on guest
+
+  # Disable IPv6 on guest: don't request a delegated prefix and don't hand out RAs.
+  # ip6assign='' (empty) keeps the interface from grabbing a /64 on all branches.
+  uci -q delete network.${GUEST_CONFIG_NAME}.ip6assign
+  uci set network.${GUEST_CONFIG_NAME}.delegate="0"
+
+  # Bridge declaration:
+  #  - 19.07/21.02/22.03 accept the legacy 'option type bridge' form.
+  #  - 21.02+ also support bridge-vlan/device sections, but the legacy form is
+  #    still honoured for a simple software bridge, so we keep it for one code
+  #    path across every supported release.
   uci set network.${GUEST_CONFIG_NAME}.type="bridge"
 }
 
-# --- Setup DHCP ---
+# --- Setup DHCP (version-aware clamping) ---
 setup_dhcp() {
   step "Setting up DHCP for guest network..."
   uci set dhcp.${GUEST_CONFIG_NAME}="dhcp"
   uci set dhcp.${GUEST_CONFIG_NAME}.interface="${GUEST_CONFIG_NAME}"
+
+  # For a /24, hosts .2-.254 are usable. Keep start+limit inside that window.
+  # start=100 -> highest usable offset is 254, so limit max = 154. Clamp to 150.
   uci set dhcp.${GUEST_CONFIG_NAME}.start="100"
   uci set dhcp.${GUEST_CONFIG_NAME}.limit="150"
   uci set dhcp.${GUEST_CONFIG_NAME}.leasetime="12h"
+
+  # Newer dnsmasq/odhcpd default to handing out IPv6; force this pool v4-only.
+  uci set dhcp.${GUEST_CONFIG_NAME}.dhcpv4="server"
+  uci -q delete dhcp.${GUEST_CONFIG_NAME}.dhcpv6
+  uci -q delete dhcp.${GUEST_CONFIG_NAME}.ra
 
   printf "Use custom public DNS for guests (1.1.1.1, 8.8.8.8)? [Y/n]: "
   read use_custom_dns
@@ -249,9 +379,8 @@ setup_dhcp() {
   case "$use_custom_dns" in
     Y|y)
       ok "Custom public DNS will be used (router forwards to 1.1.1.1 & 8.8.8.8)."
-      # Pin upstream servers once
-      if ! uci show dhcp | grep -q "dnsmasq\\[0\\]\\.server='1.1.1.1'"; then uci add_list dhcp.@dnsmasq[0].server='1.1.1.1'; fi
-      if ! uci show dhcp | grep -q "dnsmasq\\[0\\]\\.server='8.8.8.8'"; then uci add_list dhcp.@dnsmasq[0].server='8.8.8.8'; fi
+      if ! uci show dhcp | grep -q "dnsmasq\[0\]\.server='1.1.1.1'"; then uci add_list dhcp.@dnsmasq[0].server='1.1.1.1'; fi
+      if ! uci show dhcp | grep -q "dnsmasq\[0\]\.server='8.8.8.8'"; then uci add_list dhcp.@dnsmasq[0].server='8.8.8.8'; fi
       ;;
     *)
       ok "Guests will use the router's default DNS."
@@ -259,7 +388,7 @@ setup_dhcp() {
   esac
 }
 
-# --- Setup firewall ---
+# --- Setup firewall (version-aware nft/iptables) ---
 setup_firewall() {
   step "Configuring firewall rules..."
   uci set firewall.${GUEST_CONFIG_NAME}="zone"
@@ -302,6 +431,8 @@ setup_firewall() {
   uci set firewall.${GUEST_CONFIG_NAME}_dns_hijack.dest_port="53"
   uci set firewall.${GUEST_CONFIG_NAME}_dns_hijack.target="DNAT"
   uci set firewall.${GUEST_CONFIG_NAME}_dns_hijack.dest_ip="${GUEST_IP}"
+  # family is honoured by both fw3 (iptables, <=21.02) and fw4 (nftables, >=22.03)
+  uci set firewall.${GUEST_CONFIG_NAME}_dns_hijack.family="ipv4"
 
   # Block RFC1918 over WAN
   uci set firewall.${GUEST_CONFIG_NAME}_block_rfc1918_10="rule"
@@ -326,10 +457,24 @@ setup_firewall() {
   uci set firewall.${GUEST_CONFIG_NAME}_block_rfc1918_192.target="REJECT"
 }
 
-# --- Setup Wi‑Fi (fresh creation path) ---
+# --- Apply one wifi-iface's encryption fields consistently ---
+apply_iface_security() {
+  # $1 = uci section path tail (e.g. guest_2g or guest_hi)
+  sect="$1"
+  uci set wireless.${sect}.encryption="${ENC_MODE}"
+  uci set wireless.${sect}.key="${GUEST_PASSWORD}"
+  uci set wireless.${sect}.isolate="1"
+  uci set wireless.${sect}.wps_pushbutton="0"
+  case "$ENC_MODE" in
+    sae)        uci set wireless.${sect}.ieee80211w="2" ;;  # PMF required for WPA3-only
+    sae-mixed)  uci set wireless.${sect}.ieee80211w="1" ;;  # PMF optional for mixed
+    *)          uci -q delete wireless.${sect}.ieee80211w ;;
+  esac
+}
+
+# --- Setup Wi-Fi (fresh creation path) ---
 setup_wifi() {
   step "Setting up Guest SSID(s)..."
-  # Ensure radios are enabled
   uci set wireless.${RADIO_2G}.disabled='0'
   [ -n "$RADIO_HI" ] && uci set wireless.${RADIO_HI}.disabled='0'
 
@@ -338,10 +483,7 @@ setup_wifi() {
   uci set wireless.${GUEST_CONFIG_NAME}_2g.mode="ap"
   uci set wireless.${GUEST_CONFIG_NAME}_2g.network="${GUEST_CONFIG_NAME}"
   uci set wireless.${GUEST_CONFIG_NAME}_2g.ssid="${GUEST_SSID}"
-  uci set wireless.${GUEST_CONFIG_NAME}_2g.encryption="psk2+ccmp"
-  uci set wireless.${GUEST_CONFIG_NAME}_2g.key="${GUEST_PASSWORD}"
-  uci set wireless.${GUEST_CONFIG_NAME}_2g.isolate="1"
-  uci set wireless.${GUEST_CONFIG_NAME}_2g.wps_pushbutton="0"
+  apply_iface_security "${GUEST_CONFIG_NAME}_2g"
 
   if [ -n "$RADIO_HI" ]; then
     printf "Also create a 5/6GHz guest SSID? [Y/n]: "
@@ -355,10 +497,7 @@ setup_wifi() {
         uci set wireless.${GUEST_CONFIG_NAME}_hi.mode="ap"
         uci set wireless.${GUEST_CONFIG_NAME}_hi.network="${GUEST_CONFIG_NAME}"
         uci set wireless.${GUEST_CONFIG_NAME}_hi.ssid="${GUEST_SSID}-5G"
-        uci set wireless.${GUEST_CONFIG_NAME}_hi.encryption="psk2+ccmp"
-        uci set wireless.${GUEST_CONFIG_NAME}_hi.key="${GUEST_PASSWORD}"
-        uci set wireless.${GUEST_CONFIG_NAME}_hi.isolate="1"
-        uci set wireless.${GUEST_CONFIG_NAME}_hi.wps_pushbutton="0"
+        apply_iface_security "${GUEST_CONFIG_NAME}_hi"
         ;;
     esac
   fi
@@ -375,17 +514,21 @@ apply_changes() {
 # --- Show QR (optional) ---
 show_qr() {
   if command -v qrencode >/dev/null 2>&1; then
+    # WPA covers both WPA2 and WPA3-PSK for the WIFI: URI scheme.
     printf "\n"; ok "Scan this QR Code to connect (2.4GHz):"
     qrencode -t ANSIUTF8 "WIFI:T:WPA;S:${GUEST_SSID};P:${GUEST_PASSWORD};;"
   else
-    warn "qrencode not installed. Install with: opkg update && opkg install qrencode"
+    if [ "$PKG_MGR" = "apk" ]; then
+      warn "qrencode not installed. Install with: apk update && apk add qrencode"
+    else
+      warn "qrencode not installed. Install with: opkg update && opkg install qrencode"
+    fi
   fi
 }
 
 # --- Backup helpers ---
 backup_configs_light() {
   step "Creating pre-change backup of key configs..."
-  local ts out files existing f
   ts="$(timestamp)"; out="guestwifi-prechange-${ts}.tar.gz"
   files="/etc/config/network /etc/config/wireless /etc/config/dhcp /etc/config/firewall /etc/config/system"
   existing=""; for f in $files; do [ -f "$f" ] && existing="$existing $f"; done
@@ -398,7 +541,7 @@ backup_configs_light() {
 }
 full_backup() {
   step "Creating full system backup for migration..."
-  local ts out; ts="$(timestamp)"; out="openwrt-backup-${ts}.tar.gz"
+  ts="$(timestamp)"; out="openwrt-backup-${ts}.tar.gz"
   if command -v sysupgrade >/dev/null 2>&1; then
     sysupgrade -b "$out" >/dev/null 2>&1 || { warn "sysupgrade -b failed; falling back to /etc archive."; (cd / && tar -czf "$PWD/$out" etc) || error "Fallback backup failed."; }
   else
@@ -408,13 +551,13 @@ full_backup() {
 }
 restore_backup() {
   step "Restore backup selected."
-  local file
+  file=""
   if [ -f "./restore.tar.gz" ]; then file="./restore.tar.gz"
   else set -- ./restore*.tar.gz; [ -e "$1" ] && [ ! -e "$2" ] && file="$1"
   fi
   if [ -z "$file" ]; then printf "Enter path to backup tar.gz to restore: "; read file; fi
   [ -f "$file" ] || error "File not found: $file"
-  local help; help="$(sysupgrade -h 2>&1)"
+  help="$(sysupgrade -h 2>&1)"
   if echo "$help" | grep -q -- "--restore-backup"; then
     step "Restoring via: sysupgrade --restore-backup \"$file\""; sysupgrade --restore-backup "$file" || error "Restore failed."
   elif echo "$help" | grep -q -- "-r "; then
@@ -427,19 +570,19 @@ restore_backup() {
 
 # --- Existing guest notice (printed before the menu) ---
 existing_guest_note() {
-  local found=0
+  found=0
   uci -q get network.${GUEST_CONFIG_NAME}.proto >/dev/null 2>&1 && found=1
   uci -q get wireless.${GUEST_CONFIG_NAME}_2g.device >/dev/null 2>&1 && found=1
   uci -q get wireless.${GUEST_CONFIG_NAME}_hi.device >/dev/null 2>&1 && found=1
   if [ "$found" -eq 1 ]; then
-    alert "Guest network already exists — choose option 1 to re-deploy cleanly (a pre-change backup will be made)."
+    alert "Guest network already exists - choose option 1 to re-deploy cleanly (a pre-change backup will be made)."
   fi
 }
 
 # --- Menu ---
 show_menu() {
   printf "\n"
-  printf "1) Run Guest Wi‑Fi generator (fresh install / re-deploy)\n"
+  printf "1) Run Guest Wi-Fi generator (fresh install / re-deploy)\n"
   printf "2) Perform full system backup (migration/upgrade safe)\n"
   printf "3) Restore backup (looks for ./restore*.tar.gz)\n"
   printf "4) Exit\n"
@@ -452,6 +595,7 @@ main() {
   existing_guest_note
 
   if [ "$ACTION" = "uninstall" ]; then
+    detect_version
     remove_guest_network
     reload_services
     ok "Guest network successfully removed."
@@ -464,39 +608,39 @@ main() {
     case "$choice" in
       1)
         system_checks
+        detect_version
         check_ip_conflict
         detect_radios
 
-        # Confirm proceed to Wi-Fi configuration (user may want to go back to menu)
-        if ! ask_yn "Pre-flight checks complete. Configure/replace Guest Wi‑Fi now?"; then
+        if ! ask_yn "Pre-flight checks complete. Configure/replace Guest Wi-Fi now?"; then
           info "Returning to main menu."; continue
         fi
 
         printf "\n"
-        step "Please provide details for the Guest Wi‑Fi."
-        printf "Enter the Guest Wi‑Fi Name (SSID): "
+        step "Please provide details for the Guest Wi-Fi."
+        printf "Enter the Guest Wi-Fi Name (SSID): "
         read GUEST_SSID
 
         if command -v stty >/dev/null 2>&1; then
-          printf "Enter the Guest Wi‑Fi Password (min 8 chars): "
+          printf "Enter the Guest Wi-Fi Password (min 8 chars): "
           stty -echo; read GUEST_PASSWORD; stty echo; printf "\n"
         else
           warn "stty not available; password will be echoed."
-          printf "Enter the Guest Wi‑Fi Password (min 8 chars): "
+          printf "Enter the Guest Wi-Fi Password (min 8 chars): "
           read GUEST_PASSWORD
         fi
         printf "\n"
 
         validate_creds_only
+        choose_encryption
 
-        # If SSID exists, offer to replace one interface using that SSID
         EXISTING="$(ssid_exists "$GUEST_SSID")"
         if [ -n "$EXISTING" ]; then
-          alert "SSID '%s' already exists on this router." "$GUEST_SSID"
+          alert "SSID '${GUEST_SSID}' already exists on this router."
           if ask_yn "Replace one of the existing interfaces using '${GUEST_SSID}' with a Guest interface?"; then
             if select_existing_ssid_section "$GUEST_SSID"; then
               REPLACE_MODE=1
-              info "Will replace wireless.%s" "$REPLACE_SECTION"
+              info "Will replace wireless.${REPLACE_SECTION}"
             else
               warn "No interface selected for replacement. Returning to main menu."
               continue
@@ -509,7 +653,6 @@ main() {
 
         backup_configs_light || true
 
-        # Ensure guest L3/L4 exists
         setup_network
         setup_dhcp
         setup_firewall
@@ -517,14 +660,15 @@ main() {
         if [ "$REPLACE_MODE" -eq 1 ] && [ -n "$REPLACE_SECTION" ]; then
           replace_existing_ssid_section
         else
-          # Fresh creation path (create new guest SSIDs)
           setup_wifi
         fi
 
         apply_changes
 
         printf "\n"
-        ok "Guest Wi‑Fi Setup Complete!"
+        ok "Guest Wi-Fi Setup Complete!"
+        printf "OpenWrt: %s\n" "$OWRT_RELEASE"
+        printf "Security: %s\n" "$ENC_LABEL"
         printf "SSID: %s\n" "$GUEST_SSID"
         [ "$REPLACE_MODE" -eq 0 ] && [ -n "$RADIO_HI" ] && printf "SSID (5/6GHz): %s-5G\n" "$GUEST_SSID"
         printf "Password: (hidden)\n"
@@ -534,11 +678,13 @@ main() {
         ;;
       2)
         system_checks
+        detect_version
         full_backup
         printf "\n"
         ;;
       3)
         system_checks
+        detect_version
         restore_backup
         ;;
       4)
@@ -553,4 +699,3 @@ main() {
 }
 
 main "$@"
-
