@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# OpenWrt Guest Wi-Fi Gen (v3.0.0) - version-aware
+# OpenWrt Guest Wi-Fi Gen (v3.0.0) - version-aware, self-provisioning
 # Supported: 19.07 / 21.02 / 22.03 / 23.05 / 24.10 / 25.12 (+ SNAPSHOT)
 #
 # This release auto-detects the running OpenWrt version and adapts:
@@ -73,6 +73,150 @@ ask_yn() {
   case "$ans" in Y|y) return 0 ;; *) return 1 ;; esac
 }
 
+# --- Package manager helpers (version-aware) ----------------------------------
+# These wrap opkg (<=24.10) and apk (>=25.12) behind one interface. They are
+# safe to call before detect_version sets PKG_MGR: each re-checks which binary
+# exists, so they degrade gracefully on either system.
+
+# Print installed package NAMES (one per line), pkg-manager agnostic.
+pkg_list_installed() {
+  if command -v apk >/dev/null 2>&1 && [ "${PKG_MGR:-}" = "apk" ]; then
+    # apk list --installed prints "name-version arch {repo}"; strip to name.
+    apk list --installed 2>/dev/null | awk '{print $1}' | sed 's/-[0-9].*$//'
+  elif command -v opkg >/dev/null 2>&1; then
+    opkg list-installed 2>/dev/null | awk '{print $1}'
+  elif command -v apk >/dev/null 2>&1; then
+    apk list --installed 2>/dev/null | awk '{print $1}' | sed 's/-[0-9].*$//'
+  fi
+}
+
+# Is package $1 installed?
+pkg_is_installed() {
+  pkg_list_installed | grep -qx "$1"
+}
+
+# Refresh package indexes at most once per run.
+PKG_UPDATED=0
+pkg_update() {
+  [ "$PKG_UPDATED" -eq 1 ] && return 0
+  step "Refreshing package lists (one-time)..."
+  if [ "${PKG_MGR:-opkg}" = "apk" ]; then
+    apk update >/dev/null 2>&1 || { warn "apk update failed (no internet or low storage?)."; return 1; }
+  else
+    opkg update >/dev/null 2>&1 || { warn "opkg update failed (no internet or low storage?)."; return 1; }
+  fi
+  PKG_UPDATED=1
+  ok "Package lists refreshed."
+  return 0
+}
+
+# Install one package. Returns 0 on success.
+pkg_install() {
+  # $1 = package name
+  if [ "${PKG_MGR:-opkg}" = "apk" ]; then
+    apk add "$1" >/dev/null 2>&1
+  else
+    opkg install "$1" >/dev/null 2>&1
+  fi
+}
+
+# Is the WAN actually reachable? (cheap check before we try to download.)
+have_internet() {
+  # Try a couple of well-known anycast resolvers on port 53; fall back to ping.
+  for ip in 1.1.1.1 8.8.8.8; do
+    if command -v nc >/dev/null 2>&1 && nc -z -w2 "$ip" 53 >/dev/null 2>&1; then return 0; fi
+    if ping -c1 -W2 "$ip" >/dev/null 2>&1; then return 0; fi
+  done
+  return 1
+}
+
+# Ensure a single package is present; install if missing (with one update).
+# Returns 0 if present (already or after install), 1 if it could not be installed.
+ensure_package() {
+  # $1 = package name, $2 = human label (optional)
+  pkg="$1"; label="${2:-$1}"
+  if pkg_is_installed "$pkg"; then
+    ok "${label} already installed."
+    return 0
+  fi
+  info "${label} (${pkg}) is not installed."
+  if ! have_internet; then
+    warn "No internet detected; cannot install ${pkg}. Skipping."
+    return 1
+  fi
+  pkg_update || return 1
+  step "Installing ${pkg}..."
+  if pkg_install "$pkg"; then
+    ok "Installed ${pkg}."
+    return 0
+  fi
+  warn "Failed to install ${pkg} (it may not exist for this version/arch)."
+  return 1
+}
+
+# --- Up-front dependency provisioning -----------------------------------------
+# Called once, right after detect_version, BEFORE the guest is configured.
+# Installs the small, safe extras the script uses. It deliberately does NOT
+# touch wpad here (swapping the authenticator can drop Wi-Fi mid-run); that is
+# handled separately and only with explicit consent. See maybe_upgrade_wpad().
+QRENCODE_OK=0
+ensure_dependencies() {
+  step "Provisioning required packages for this run..."
+  # qrencode: used to print the join-QR at the end. Optional but the whole
+  # point of the request, so we install it up front.
+  if ensure_package "qrencode" "QR-code generator (qrencode)"; then
+    QRENCODE_OK=1
+  else
+    QRENCODE_OK=0
+    warn "Continuing without qrencode; a text summary will be shown instead of a QR code."
+  fi
+  # Note: uci, dnsmasq, firewall(4) and a wpad/hostapd variant are part of every
+  # standard OpenWrt image, so we verify rather than install them.
+  for base in uci; do
+    command -v "$base" >/dev/null 2>&1 || warn "Base tool '$base' missing; this is unusual for OpenWrt."
+  done
+  ok "Dependency check complete."
+}
+
+# --- Optional, consent-gated wpad upgrade for WPA3 on mini builds -------------
+# Only relevant when the user asked for WPA3 but the installed authenticator is
+# a *-mini build that cannot do SAE. Swapping wpad restarts hostapd and can
+# disconnect you if you are connected over Wi-Fi, so this is opt-in and defaults
+# to a safe WPA2 fallback. Sets WPA3_AVAILABLE=1 on success.
+maybe_upgrade_wpad() {
+  # Pick the replacement that matches the crypto lib the system already uses.
+  detect_wpad_pkg
+  case "$WPAD_PKG" in
+    *wolfssl*) target="wpad-wolfssl" ;;
+    *openssl*) target="wpad-openssl" ;;
+    *mbedtls*) target="wpad-mbedtls" ;;
+    *)         target="wpad-mbedtls" ;;  # modern default crypto lib
+  esac
+  printf "\n"
+  alert "WPA3 needs a fuller 'wpad' than the '${WPAD_PKG:-mini}' build you have."
+  warn  "Replacing wpad restarts Wi-Fi. If you are connected over Wi-Fi (not cable),"
+  warn  "you may be briefly disconnected and, in rare cases, locked out until reboot."
+  if ! ask_yn "Install ${target} now to enable WPA3? (No = stay on WPA2)"; then
+    info "Keeping current authenticator; WPA3 will not be offered."
+    return 1
+  fi
+  if ! have_internet; then
+    warn "No internet detected; cannot install ${target}. Staying on WPA2."
+    return 1
+  fi
+  pkg_update || return 1
+  step "Swapping ${WPAD_PKG:-wpad-mini} -> ${target}..."
+  # On opkg, install the new wpad; it conflicts-replaces the mini one. On apk,
+  # add the new one (apk resolves the provides/replaces relationship).
+  if pkg_install "$target"; then
+    ok "Installed ${target}. WPA3 is now available."
+    WPA3_AVAILABLE=1
+    return 0
+  fi
+  warn "Could not install ${target}; staying on WPA2."
+  return 1
+}
+
 # --- Version detection ---------------------------------------------------------
 # Reads /etc/openwrt_release (DISTRIB_RELEASE). Sets OWRT_RELEASE, OWRT_VERNUM,
 # PKG_MGR and WPA3_AVAILABLE. SNAPSHOT/dev builds are treated as newest.
@@ -107,8 +251,9 @@ detect_version() {
     PKG_MGR="opkg"
   fi
 
-  # WPA3/SAE: encryption code exists from 21.02 onward AND requires full wpad
-  # (wpad-mini / wpad-basic-* cannot do SAE). Gate on both.
+  # WPA3/SAE: encryption code exists from 21.02 onward AND the installed
+  # authenticator must support SAE. Only *-mini lacks it; basic-* and full
+  # variants are fine. Gate on both version and package.
   if [ "$OWRT_VERNUM" -ge 2102 ] && wpa3_supported; then
     WPA3_AVAILABLE=1
   else
@@ -122,32 +267,55 @@ detect_version() {
   fi
 }
 
-# --- Does this build's hostapd/wpad actually support SAE? ---
+# --- Which wpad/hostapd authenticator is installed? ---
+# Sets WPAD_PKG to the installed package name (or "" if none found).
+WPAD_PKG=""
+detect_wpad_pkg() {
+  WPAD_PKG=""
+  list="$(pkg_list_installed)"
+  [ -n "$list" ] || return 1
+  # Prefer the most specific match. wpad* covers AP+STA; hostapd* is AP-only.
+  WPAD_PKG="$(printf "%s\n" "$list" | grep -E '^(wpad|hostapd)(-(mini|basic))?(-(openssl|wolfssl|mbedtls))?$' | head -n1)"
+  [ -n "$WPAD_PKG" ]
+}
+
+# --- Does this build's hostapd/wpad actually support SAE (WPA3)? ---
 wpa3_supported() {
-  # Full wpad provides SAE. wpad-mini and wpad-basic* do not. wpad-openssl /
-  # wpad-wolfssl / wpad-mbedtls DO. Detect by inspecting installed packages.
-  # Returns 0 (supported) / 1 (not).
-  pkgs=""
-  if command -v opkg >/dev/null 2>&1; then
-    pkgs="$(opkg list-installed 2>/dev/null | awk '{print $1}')"
-  elif command -v apk >/dev/null 2>&1; then
-    pkgs="$(apk list --installed 2>/dev/null | awk '{print $1}' | sed 's/-[0-9].*$//')"
-  fi
-  if [ -n "$pkgs" ]; then
-    # Any full wpad/hostapd variant that is not mini/basic implies SAE support.
-    echo "$pkgs" | grep -E '^(wpad|hostapd)(-(openssl|wolfssl|mbedtls))?$' | grep -qvE 'mini|basic' && return 0
-    # mini/basic only -> no SAE
-    echo "$pkgs" | grep -qE 'wpad-(mini|basic)' && return 1
-  fi
-  # Could not read package list (unusual). Be conservative: assume no SAE so we
-  # never hand out a config that silently fails to start hostapd.
-  return 1
+  # SAE (WPA3-Personal) support by package:
+  #   wpad-mini ................... NO  (WPA/WPA2 PSK only, no SAE)
+  #   wpad-basic-{mbedtls,wolfssl,openssl} ... YES (WPA3-PSK, 802.11w, OWE)
+  #   wpad / wpad-{mbedtls,wolfssl,openssl} .. YES (full: +Enterprise/r/hotspot)
+  #   hostapd* (AP-only) .......... mirrors the wpad tiers above
+  # So: anything that is NOT a *-mini build supports WPA3-Personal.
+  detect_wpad_pkg || {
+    # Couldn't read the package db. Be conservative: no SAE, so we never write
+    # a config that silently fails to bring up hostapd.
+    return 1
+  }
+  case "$WPAD_PKG" in
+    *mini*) return 1 ;;   # mini = no SAE
+    *)      return 0 ;;   # basic-* and full = SAE-capable
+  esac
 }
 
 # --- Decide encryption mode based on version + user choice ---
 choose_encryption() {
   # Default everywhere: WPA2 (psk2+ccmp) for the broadest client compatibility.
   ENC_MODE="psk2+ccmp"; ENC_LABEL="WPA2"
+
+  # If WPA3 isn't currently available but the ONLY blocker is a *-mini wpad on
+  # an otherwise-capable version, offer to upgrade the authenticator.
+  if [ "$WPA3_AVAILABLE" -eq 0 ] && [ "$OWRT_VERNUM" -ge 2102 ]; then
+    detect_wpad_pkg
+    case "$WPAD_PKG" in
+      *mini*)
+        if ask_yn "Your build can't do WPA3 yet (wpad-mini). Enable WPA3 support?"; then
+          maybe_upgrade_wpad || true
+        fi
+        ;;
+    esac
+  fi
+
   if [ "$WPA3_AVAILABLE" -eq 1 ]; then
     printf "\n"
     info "This build supports WPA3 (SAE)."
@@ -511,17 +679,23 @@ apply_changes() {
   ok "Configuration applied successfully."
 }
 
-# --- Show QR (optional) ---
+# --- Show QR (uses qrencode provisioned earlier) ---
 show_qr() {
   if command -v qrencode >/dev/null 2>&1; then
-    # WPA covers both WPA2 and WPA3-PSK for the WIFI: URI scheme.
+    # "WPA" in the WIFI: URI covers both WPA2 and WPA3-PSK clients.
     printf "\n"; ok "Scan this QR Code to connect (2.4GHz):"
     qrencode -t ANSIUTF8 "WIFI:T:WPA;S:${GUEST_SSID};P:${GUEST_PASSWORD};;"
+    printf "\n"
+    info "If your terminal can't render the QR, the join string is:"
+    printf "  WIFI:T:WPA;S:%s;P:%s;;\n" "$GUEST_SSID" "$GUEST_PASSWORD"
   else
-    if [ "$PKG_MGR" = "apk" ]; then
-      warn "qrencode not installed. Install with: apk update && apk add qrencode"
+    # qrencode wasn't available and couldn't be installed earlier.
+    warn "qrencode is unavailable, so here is the raw Wi-Fi join string instead:"
+    printf "  WIFI:T:WPA;S:%s;P:%s;;\n" "$GUEST_SSID" "$GUEST_PASSWORD"
+    if [ "${PKG_MGR:-opkg}" = "apk" ]; then
+      info "To get a scannable QR later: apk update && apk add qrencode"
     else
-      warn "qrencode not installed. Install with: opkg update && opkg install qrencode"
+      info "To get a scannable QR later: opkg update && opkg install qrencode"
     fi
   fi
 }
@@ -609,6 +783,7 @@ main() {
       1)
         system_checks
         detect_version
+        ensure_dependencies
         check_ip_conflict
         detect_radios
 
